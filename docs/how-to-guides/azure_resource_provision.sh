@@ -1,40 +1,22 @@
 #!/bin/bash          
 
 # Fill in details in this section
-subscription_id="{your_subscription_id}"
-resource_prefix="feathrazuretest"
-location="eastus2"
+subscription_id="$subscription_id"
+resource_suffix="$resource_suffix"
+resource_prefix="$resource_prefix"
+location="northeurope"
 synapse_sql_admin_name="cliuser1"
-synapse_sql_admin_password="{your_admin_password}"
-synapse_sparkpool_name="spark31"
+synapse_sql_admin_password="${synapse_sql_admin_pwd}"
+synapse_sparkpool_name="${spark_pool_name}"
 
 # You don't have to modify the names below
-service_principal_name="$resource_prefix"sp
-resoruce_group_name="$resource_prefix"rg
-storage_account_name="$resource_prefix"sto
-storage_file_system_name="$resource_prefix"fs
-synapse_workspace_name="$resource_prefix"spark
-redis_cluster_name="$resource_prefix"redis
-purview_account_name="$resource_prefix"purview
-synapse_firewall_rule_name="$resource_prefix"firewall
-
-# detect whether az cli is installed or not
-if ! [ -x "$(command -v az)" ]; then
-  echo 'Error: Azure CLI is not installed. Please follow guidance on https://aka.ms/azure-cli to install az command line' >&2
-  exit 1
-fi
-
-az upgrade --all true --yes
-# login if required
-az account get-access-token
-if [[ $? == 0 ]]; then
-  echo "Logged in, using current subscriptions "
-else
-  echo "Logging in via az login..."
-  az login --use-device-code
-fi
-
-
+service_principal_name="$resource_suffix"sp
+resource_group_name="$resource_prefix"-"$resource_suffix"
+storage_account_name=sto"$resource_suffix"
+storage_file_system_name=filesystem"$resource_suffix"
+synapse_workspace_name=synapse"$resource_suffix"
+purview_account_name=purview"$resource_suffix"
+synapse_firewall_rule_name=firewall"$resource_suffix"
 
 echo "Setting subscription to $subscription_id, Creating $service_principal_name service principal"
 az account set -s $subscription_id
@@ -52,66 +34,60 @@ echo "IMPORTATNT: Please write AZURE_CLIENT_SECRET down as you won't see it agai
 echo "AZURE_CLIENT_ID: $sp_appid"
 echo "AZURE_TENANT_ID: $sp_tenantid"
 echo "AZURE_CLIENT_SECRET: $sp_password"
-az group create -l $location -n $resoruce_group_name
 
-# Create Storage Account
-az storage account create --name $storage_account_name  --resource-group $resoruce_group_name --location $location --enable-hierarchical-namespace
+# Don't create resource group if it already exists...
+#az group create -l $location -n $resource_group_name
+
+# Create Storage Account for Feathr offline store
+az storage account create --name $storage_account_name  --resource-group $resource_group_name --location $location --enable-hierarchical-namespace
 
 az storage fs create -n $storage_file_system_name --account-name $storage_account_name 
 
-az role assignment create --role "Storage Blob Data Contributor" --assignee "$sp_objectid" --scope "/subscriptions/$subscription_id/resourceGroups/$resoruce_group_name/providers/Microsoft.Storage/storageAccounts/$storage_account_name"
+az role assignment create --role "Storage Blob Data Contributor" --assignee "$sp_objectid" --scope "/subscriptions/$subscription_id/resourceGroups/$resource_group_name/providers/Microsoft.Storage/storageAccounts/$storage_account_name"
 
-# Create Synapse Cluster
-az synapse workspace create --name $synapse_workspace_name --resource-group $resoruce_group_name  --storage-account $storage_account_name --file-system $storage_file_system_name --sql-admin-login-user $synapse_sql_admin_name --sql-admin-login-password $synapse_sql_admin_password --location $location
-
-az synapse spark pool create --name $synapse_sparkpool_name --workspace-name $synapse_workspace_name  --resource-group $resoruce_group_name --spark-version 3.1 --node-count 3 --node-size Medium --enable-auto-pause true --delay 30
+# Create Synapse Cluster - Don't create, already exists
+#az synapse workspace create --name $synapse_workspace_name --resource-group $resource_group_name  --storage-account $storage_account_name --file-system $storage_file_system_name --sql-admin-login-user $synapse_sql_admin_name --sql-admin-login-password $synapse_sql_admin_password --location $location
+#az synapse spark pool create --name $synapse_sparkpool_name --workspace-name $synapse_workspace_name  --resource-group $resource_group_name --spark-version 3.1 --node-count 3 --node-size Medium --enable-auto-pause true --delay 30
 
 # depending on your preference, you can set a narrow range of IPs (like below) or a broad range of IPs to allow client access to Synapse clusters
-external_ip=$(curl -s http://whatismyip.akamai.com/)
-echo "External IP is: ${external_ip}. Adding it to firewall rules" 
-az synapse workspace firewall-rule create --name $synapse_firewall_rule_name --workspace-name $synapse_workspace_name --resource-group $resoruce_group_name --start-ip-address "$external_ip" --end-ip-address "$external_ip"
+#external_ip=$(curl -s http://whatismyip.akamai.com/)
+#echo "External IP is: ${external_ip}. Adding it to firewall rules" 
+#az synapse workspace firewall-rule create --name $synapse_firewall_rule_name --workspace-name $synapse_workspace_name --resource-group $resource_group_name --start-ip-address "$external_ip" --end-ip-address "$external_ip"
 
-echo "Waiting IP Address ${external_ip} to be added in the firewall rule." 
-az synapse workspace firewall-rule wait --rule-name $synapse_firewall_rule_name --created --workspace-name $synapse_workspace_name --resource-group $resoruce_group_name
+#echo "Waiting IP Address ${external_ip} to be added in the firewall rule." 
+#az synapse workspace firewall-rule wait --rule-name $synapse_firewall_rule_name --created --workspace-name $synapse_workspace_name --resource-group $resource_group_name
 
-
-ERROR=$(az synapse role assignment create --workspace-name $synapse_workspace_name --role "Synapse Contributor" --assignee $service_principal_name 2>&1 >/dev/null)
+az synapse role assignment create --workspace-name $synapse_workspace_name --role "Synapse Contributor" --assignee $service_principal_name 2>&1 >/dev/null
+#ERROR=$(az synapse role assignment create --workspace-name $synapse_workspace_name --role "Synapse Contributor" --assignee $service_principal_name 2>&1 >/dev/null)
 
 # adding this logic because sometimes the firewall rule will recognize a different IP address
-if [ -z "$ERROR" ]
-then
+#if [ -z "$ERROR" ]
+#then
       # meaning the previous command is successful
-      echo "Role added successfully"
-else  
+#      echo "Role added successfully"
+#else  
       # reading IP address from error
       # error will be something like: 
       # WARNING: Command group 'synapse' is in preview and under development. Reference and support levels: https://aka.ms/CLI_refstatus\nERROR: (ClientIpAddressNotAuthorized) Client Ip address : 167.220.102.79\nCode: ClientIpAddressNotAuthorized\nMessage: Client Ip address : 167.220.xx.xx
-      read external_ip < <(echo $ERROR | grep -o '[0-9]\+[.][0-9]\+[.][0-9]\+[.][0-9]\+')
-      echo "External IP is: ${external_ip}. Adding it to firewall rules" 
-      az synapse workspace firewall-rule create --name $synapse_firewall_rule_name --workspace-name $synapse_workspace_name --resource-group $resoruce_group_name --start-ip-address "$external_ip" --end-ip-address "$external_ip"
+#      read external_ip < <(echo $ERROR | grep -o '[0-9]\+[.][0-9]\+[.][0-9]\+[.][0-9]\+')
+#      echo "External IP is: ${external_ip}. Adding it to firewall rules" 
+#      az synapse workspace firewall-rule create --name $synapse_firewall_rule_name --workspace-name $synapse_workspace_name --resource-group $resource_group_name --start-ip-address "$external_ip" --end-ip-address "$external_ip"
 
-      echo "Waiting IP Address ${external_ip} to be added in the firewall rule." 
-      az synapse workspace firewall-rule wait --rule-name $synapse_firewall_rule_name --created --workspace-name $synapse_workspace_name --resource-group $resoruce_group_name
+#      echo "Waiting IP Address ${external_ip} to be added in the firewall rule." 
+#      az synapse workspace firewall-rule wait --rule-name $synapse_firewall_rule_name --created --workspace-name $synapse_workspace_name --resource-group $resource_group_name
       
-fi
+#fi
 
 echo "Verify if the assignment is successful or not:"
 az synapse role assignment list --workspace-name $synapse_workspace_name  --assignee $service_principal_name
 
-# Create a Redis cluster for online storage
-echo "Creating Redis Cluster..."
-az redis create --location $location --name $redis_cluster_name --resource-group $resoruce_group_name  --sku Basic --vm-size c0 --redis-version 6
-
-echo "Record this Redis Key which you will use later:"
-redis_password=$(az redis list-keys --name $redis_cluster_name --resource-group $resoruce_group_name  --query "[primaryKey]" --out tsv)
-echo "REDIS_PASSWORD: $redis_password"
-
-echo "creating purview account"
-az extension add --name purview
-az purview account create --location $location --account-name $purview_account_name --resource-group $resoruce_group_name 
+# Not sure we need a purview account...
+#echo "creating purview account"
+#az extension add --name purview
+#az purview account create --location $location --account-name $purview_account_name --resource-group $resource_group_name 
 
 # echo "Add purview permission:"
-# az purview account add-root-collection-admin --name $purview_account_name --object-id "$sp_objectid" --resource-group $resoruce_group_name 
+# az purview account add-root-collection-admin --name $purview_account_name --object-id "$sp_objectid" --resource-group $resource_group_name 
 
 # this is completely optional. It will download some demo NYC data and upload it to the default storage account, to make the setup experience smoother
 echo "preparing data"
@@ -128,13 +104,11 @@ echo "AZURE_CLIENT_SECRET: $sp_password"
 echo "SYNAPSE_DEV_URL: https://$synapse_workspace_name.dev.azuresynapse.net"
 echo "SYNAPSE_POOL_NAME: $synapse_sparkpool_name"
 echo "SYNAPSE_WORKSPACE_DIR: abfss://$storage_file_system_name@$storage_account_name.dfs.core.windows.net/"
-echo "REDIS_PASSWORD: $redis_password"
-echo "REDIS_HOST: $redis_cluster_name.redis.cache.windows.net"
-echo "AZURE_PURVIEW_NAME: $purview_account_name"
+#echo "AZURE_PURVIEW_NAME: $purview_account_name"
 echo "Demo Data Location: abfss://$storage_file_system_name@$storage_account_name.dfs.core.windows.net/demo_data/green_tripdata_2020-04.csv"
 
 echo "outputPath: abfss://$storage_file_system_name@$storage_account_name.dfs.core.windows.net/demo_data/output.avro"
 
 # Delete resources if you want
-# az group delete -n $resoruce_group_name --yes
+# az group delete -n $resource_group_name --yes
 # az ad sp delete --id $sp_objectid
